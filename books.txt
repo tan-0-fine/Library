@@ -1,3 +1,10 @@
-1,Java Cơ bản,Nguyen Van A,available
-2,Lập trình mạng,Tran Van B,available
-3,Cấu trúc dữ liệu,Le Thi C,borrowed
+1,Java Cơ bản,Nguyen Van A,4
+2,Lập trình mạng,Tran Van B,3
+3,Cấu trúc dữ liệu,Le Thi C,2
+4,Python nâng cao,Pham Van D,5
+5,Hệ điều hành,Nguyen Thi E,2
+6,Thuật toán và tối ưu,Le Van F,3
+7,React cơ bản,Tran Thi G,4
+8,Cơ sở dữ liệu,Hoang Van H,3
+9,Lập trình C++,Nguyen Van I,2
+10,Mạng máy tính nâng cao,Le Thi J,3
