@@ -1,0 +1,62 @@
+package Server;
+
+import java.io.*;
+import java.util.*;
+
+public class LibraryData {
+    private static final String DATA_FILE = "data/books.txt";
+    private Map<String, Book> books = new HashMap<>();
+
+    public LibraryData(String filename) {
+        loadBooks(filename);
+    }
+
+    private void loadBooks(String filename) {
+        try (BufferedReader br = new BufferedReader(new FileReader(filename))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                // Format: id,title,author,status
+                String[] parts = line.split(",");
+                if (parts.length == 4) {
+                    books.put(parts[0], new Book(parts[0], parts[1], parts[2], parts[3]));
+                }
+            }
+            System.out.println("✅ Tai du lieu sach thanh cong: " + books.size() + " cuon.");
+        } catch (IOException e) {
+            System.out.println("⚠️ Khong the đoc file sach: " + filename);
+        }
+    }
+
+    public synchronized String search(String keyword) {
+        StringBuilder result = new StringBuilder();
+        for (Book book : books.values()) {
+            if (book.getTitle().toLowerCase().contains(keyword.toLowerCase()) ||
+                book.getAuthor().toLowerCase().contains(keyword.toLowerCase())) {
+                result.append(book).append("\n");
+            }
+        }
+        return result.length() > 0 ? result.toString() : "❌ Khong tim thay sach nao.";
+    }
+
+    public synchronized String borrow(String id) {
+        Book book = books.get(id);
+        if (book == null) return "❌ Khong ton tai sach co ID: " + id;
+        if (book.getStatus().equalsIgnoreCase("available")) {
+            book.setStatus("borrowed");
+            return "✅ Muon sach thanh cang: " + book.getTitle();
+        } else {
+            return "❌ Sach da duoc muon: " + book.getTitle();
+        }
+    }
+
+    public synchronized String returnBook(String id) {
+        Book book = books.get(id);
+        if (book == null) return "❌ Khong ton tai sach co ID: " + id;
+        if (book.getStatus().equalsIgnoreCase("borrowed")) {
+            book.setStatus("available");
+            return "✅ Tra sach thanh cong: " + book.getTitle();
+        } else {
+            return "❌ Sach nay chua duoc muon.";
+        }
+    }
+}
