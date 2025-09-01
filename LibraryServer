@@ -1,0 +1,27 @@
+package Server;
+
+import java.io.*;
+import java.net.*;
+
+public class LibraryServer {
+    private static final int PORT = 5000;
+    private static final String DATA_FILE = "data/books.txt";  // ✅ thêm hằng số đường dẫn file
+
+    public static void main(String[] args) {
+        // ✅ tạo LibraryData dùng chung cho tất cả client
+        LibraryData libraryData = new LibraryData(DATA_FILE);
+
+        try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+            System.out.println("✅ Library Server đang chạy trên cổng " + PORT);
+
+            while (true) {
+                Socket clientSocket = serverSocket.accept();
+                System.out.println("🔗 Client kết nối: " + clientSocket);
+                // ✅ truyền libraryData vào ClientHandler
+                new Thread(new ClientHandler(clientSocket, libraryData)).start();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
