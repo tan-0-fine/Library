@@ -1,72 +1,308 @@
 package Server;
 
+import com.sun.net.httpserver.*;
 import java.io.*;
 import java.net.*;
+import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
+import java.util.*;
 
 public class HttpLibraryServer {
-    private static LibraryData library = new LibraryData("data/books.txt");
+    private static UserManager userManager = new UserManager("data/users.txt");
+    private static List<Book> books = new ArrayList<>();
+    private static Map<String, String> sessions = new HashMap<>();
+    private static Map<String, List<BorrowRecord>> borrowedBooks = new HashMap<>();
+    private static SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 
-    public static void main(String[] args) throws IOException {
-        int port = 8080;
-        ServerSocket serverSocket = new ServerSocket(port);
-        System.out.println("🌐 HTTP Library Server chạy tại http://localhost:" + port);
+    public static void main(String[] args) throws Exception {
+        loadBooks();
 
-        while (true) {
-            Socket client = serverSocket.accept();
-            new Thread(() -> handleClient(client)).start();
+        HttpServer server = HttpServer.create(new InetSocketAddress(8080), 0);
+
+        server.createContext("/", exchange -> handleRoot(exchange));
+        server.createContext("/login", exchange -> handleLogin(exchange));
+        server.createContext("/doLogin", exchange -> handleDoLogin(exchange));
+        server.createContext("/register", exchange -> handleRegister(exchange));
+        server.createContext("/doRegister", exchange -> handleDoRegister(exchange));
+        server.createContext("/logout", exchange -> handleLogout(exchange));
+        server.createContext("/borrow", exchange -> handleBorrow(exchange));
+        server.createContext("/history", exchange -> handleHistory(exchange));
+        server.createContext("/return", exchange -> handleReturn(exchange));
+        server.createContext("/forgot", exchange -> handleForgot(exchange));
+        server.createContext("/doForgot", exchange -> handleDoForgot(exchange));
+
+        server.setExecutor(null);
+        System.out.println("HTTP Server started on port 8080");
+        server.start();
+    }
+
+    private static void loadBooks() {
+        try (BufferedReader br = new BufferedReader(new FileReader("data/books.txt"))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                // Format: id,title,author,totalCopies
+                String[] parts = line.split(",", 4);
+                if (parts.length >= 4) {
+                    books.add(new Book(parts[0], parts[1], parts[2], Integer.parseInt(parts[3])));
+                }
+            }
+        } catch (IOException e) {
+            System.out.println("Không thể load books.txt");
         }
     }
 
-    private static void handleClient(Socket client) {
-        try (
-            BufferedReader in = new BufferedReader(new InputStreamReader(client.getInputStream()));
-            PrintWriter out = new PrintWriter(client.getOutputStream());
-        ) {
-            // Đọc request HTTP (chỉ dòng đầu tiên GET ...)
-            String line = in.readLine();
-            if (line == null) return;
-            System.out.println("📩 HTTP Request: " + line);
+    private static void handleRoot(HttpExchange exchange) throws IOException {
+        String user = getUser(exchange);
+        if (user == null) { redirect(exchange, "/login"); return; }
 
-            String response;
-            if (line.startsWith("GET /search")) {
-                String keyword = getQueryParam(line, "keyword");
-                response = library.search(keyword);
-            } else if (line.startsWith("GET /borrow")) {
-                String id = getQueryParam(line, "id");
-                response = library.borrow(id);
-            } else if (line.startsWith("GET /return")) {
-                String id = getQueryParam(line, "id");
-                response = library.returnBook(id);
-            } else {
-                response = "⚠️ Dùng /search?keyword=... hoặc /borrow?id=... hoặc /return?id=...";
+        StringBuilder response = new StringBuilder();
+        response.append("<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Thư viện</title></head><body>");
+        response.append("<title>Thư Viện Demo</title></head><body>");
+        response.append("<h1>Thư Viện Demo</h1>");
+        response.append("<h2>Xin chào, ").append(user).append("!</h2>");
+        response.append("<a href='/logout'>Đăng xuất</a> | <a href='/history'>Lịch sử mượn</a><br><br>");
+
+        response.append("<form method='GET' action='/'>Tìm sách: <input type='text' name='q'> <input type='submit' value='Search'></form><br>");
+
+        String query = exchange.getRequestURI().getQuery();
+        String keyword = null;
+        if (query != null && query.startsWith("q=")) {
+            keyword = URLDecoder.decode(query.substring(2), StandardCharsets.UTF_8);
+        }
+
+        response.append("<h3>Danh sách sách</h3><ul>");
+        for (Book b : books) {
+            if (keyword == null || b.getTitle().toLowerCase().contains(keyword.toLowerCase())) {
+                int borrowed = (int) borrowedBooks.values().stream()
+                        .flatMap(List::stream)
+                        .filter(br -> br.getBookId().equals(b.getId()) && br.getReturnTime() == null)
+                        .count();
+                int available = b.getTotalCopies() - borrowed;
+
+                response.append("<li>")
+                        .append(b.getTitle())
+                        .append(" (").append(b.getAuthor()).append(") - ")
+                        .append(available > 0 ? "Có sẵn" : "Hết sách")
+                        .append(" | Số lượng còn: ").append(available).append("/").append(b.getTotalCopies());
+
+                if (available > 0) {
+                    response.append("<form method='GET' action='/borrow' style='display:inline;'>")
+                            .append("<input type='hidden' name='id' value='").append(b.getId()).append("'>")
+                            .append(" Ngày dự kiến trả: <input type='date' name='due'>")
+                            .append(" <input type='submit' value='Mượn'>")
+                            .append("</form>");
+                }
+
+                response.append("</li>");
+            }
+        }
+        response.append("</ul></body></html>");
+        sendResponse(exchange, response.toString());
+    }
+
+    // ================== Login/Register/Forgot ==================
+    private static void handleLogin(HttpExchange exchange) throws IOException {
+        String response = "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Đăng nhập</title></head><body>"
+                + "<h2>Đăng nhập</h2>"
+                + "<form method='POST' action='/doLogin'>"
+                + "Tên đăng nhập: <input type='text' name='username'><br>"
+                + "Mật khẩu: <input type='password' name='password'><br>"
+                + "<input type='submit' value='Đăng nhập'>"
+                + "</form>"
+                + "<a href='/register'>Đăng ký</a> | <a href='/forgot'>Quên mật khẩu</a>"
+                + "</body></html>";
+        sendResponse(exchange, response);
+    }
+
+    private static void handleDoLogin(HttpExchange exchange) throws IOException {
+        if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            Map<String, String> params = parsePost(exchange);
+            String user = params.get("username");
+            String pass = params.get("password");
+            if (userManager.authenticate(user, pass)) {
+                String sessionId = UUID.randomUUID().toString();
+                sessions.put(sessionId, user);
+                exchange.getResponseHeaders().add("Set-Cookie", "sessionId=" + sessionId + "; Path=/");
+                redirect(exchange, "/");
+                return;
+            }
+        }
+        redirect(exchange, "/login");
+    }
+
+    private static void handleRegister(HttpExchange exchange) throws IOException {
+        String response = "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Đăng ký</title></head><body>"
+                + "<h2>Đăng ký tài khoản</h2>"
+                + "<form method='POST' action='/doRegister'>"
+                + "Tên đăng nhập: <input type='text' name='username'><br>"
+                + "Mật khẩu: <input type='password' name='password'><br>"
+                + "<input type='submit' value='Đăng ký'>"
+                + "</form>"
+                + "<a href='/login'>Đăng nhập</a>"
+                + "</body></html>";
+        sendResponse(exchange, response);
+    }
+
+    private static void handleDoRegister(HttpExchange exchange) throws IOException {
+        if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            Map<String, String> params = parsePost(exchange);
+            String user = params.get("username");
+            String pass = params.get("password");
+            if (userManager.register(user, pass)) { redirect(exchange, "/login"); return; }
+        }
+        redirect(exchange, "/register");
+    }
+
+    private static void handleLogout(HttpExchange exchange) throws IOException {
+        String sessionId = getSessionId(exchange);
+        if (sessionId != null) sessions.remove(sessionId);
+        redirect(exchange, "/login");
+    }
+
+    private static void handleForgot(HttpExchange exchange) throws IOException {
+        String response = "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Quên mật khẩu</title></head><body>"
+                + "<h2>Quên mật khẩu</h2>"
+                + "<form method='POST' action='/doForgot'>"
+                + "Tên đăng nhập: <input type='text' name='username'><br>"
+                + "Mật khẩu mới: <input type='password' name='password'><br>"
+                + "<input type='submit' value='Reset mật khẩu'>"
+                + "</form>"
+                + "<a href='/login'>Đăng nhập</a>"
+                + "</body></html>";
+        sendResponse(exchange, response);
+    }
+
+    private static void handleDoForgot(HttpExchange exchange) throws IOException {
+        if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            Map<String, String> params = parsePost(exchange);
+            String user = params.get("username");
+            String pass = params.get("password");
+            if (userManager.resetPassword(user, pass)) { redirect(exchange, "/login"); return; }
+        }
+        redirect(exchange, "/forgot");
+    }
+
+    // ================== Borrow/Return/History ==================
+    private static void handleBorrow(HttpExchange exchange) throws IOException {
+        String user = getUser(exchange);
+        if (user == null) { redirect(exchange, "/login"); return; }
+
+        String query = exchange.getRequestURI().getQuery();
+        if (query != null) {
+            Map<String, String> params = new HashMap<>();
+            for (String pair : query.split("&")) {
+                String[] kv = pair.split("=");
+                if (kv.length == 2)
+                    params.put(URLDecoder.decode(kv[0], StandardCharsets.UTF_8),
+                               URLDecoder.decode(kv[1], StandardCharsets.UTF_8));
             }
 
-            // Trả về HTTP Response
-            out.println("HTTP/1.1 200 OK");
-            out.println("Content-Type: text/html; charset=UTF-8");
-            out.println();
-            out.println("<html><body>");
-            out.println("<h2>📚 Kết quả:</h2>");
-            out.println("<pre>" + response + "</pre>");
-            out.println("</body></html>");
-            out.flush();
+            String id = params.get("id");
+            String dueStr = params.get("due");
+            Date dueDate = null;
+            try { if (dueStr != null) dueDate = new SimpleDateFormat("yyyy-MM-dd").parse(dueStr); }
+            catch (Exception e) { dueDate = null; }
 
-        } catch (IOException e) {
-            e.printStackTrace();
-        } finally {
-            try { client.close(); } catch (IOException e) {}
+            if (id != null) {
+                Book book = books.stream().filter(b -> b.getId().equals(id)).findFirst().orElse(null);
+                if (book != null && book.getAvailableCopies() > 0) {
+                    borrowedBooks.putIfAbsent(user, new ArrayList<>());
+                    borrowedBooks.get(user).add(new BorrowRecord(id, new Date()));
+                }
+            }
         }
+        redirect(exchange, "/");
     }
 
-    private static String getQueryParam(String requestLine, String key) {
-        // Ví dụ: GET /search?keyword=Java HTTP/1.1
-        int qIndex = requestLine.indexOf("?");
-        if (qIndex == -1) return "";
-        String[] params = requestLine.substring(qIndex + 1, requestLine.indexOf(" ", qIndex)).split("&");
-        for (String p : params) {
-            String[] kv = p.split("=");
-            if (kv.length == 2 && kv[0].equals(key)) return kv[1];
+    private static void handleReturn(HttpExchange exchange) throws IOException {
+        String user = getUser(exchange);
+        if (user == null) { redirect(exchange, "/login"); return; }
+
+        String query = exchange.getRequestURI().getQuery();
+        if (query != null && query.startsWith("id=")) {
+            String id = query.substring(3);
+            List<BorrowRecord> history = borrowedBooks.get(user);
+            if (history != null) {
+                for (BorrowRecord br : history) {
+                    if (br.getBookId().equals(id) && br.getReturnTime() == null) {
+                        br.setReturnTime(new Date());
+                        break;
+                    }
+                }
+            }
         }
-        return "";
+        redirect(exchange, "/history");
+    }
+
+    private static void handleHistory(HttpExchange exchange) throws IOException {
+        String user = getUser(exchange);
+        if (user == null) { redirect(exchange, "/login"); return; }
+
+        StringBuilder response = new StringBuilder();
+        response.append("<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Lịch sử mượn</title></head><body>");
+        response.append("<h2>Lịch sử mượn của ").append(user).append("</h2><ul>");
+
+        List<BorrowRecord> history = borrowedBooks.getOrDefault(user, new ArrayList<>());
+        for (BorrowRecord br : history) {
+            Book book = books.stream().filter(b -> b.getId().equals(br.getBookId())).findFirst().orElse(null);
+            if (book == null) continue;
+            response.append("<li>")
+                    .append(book.getTitle()).append(" (").append(book.getAuthor()).append(") - ")
+                    .append("Mượn: ").append(sdf.format(br.getBorrowTime()))
+                    .append(" | Dự kiến trả: ").append(br.getDueDate() != null ? sdf.format(br.getDueDate()) : "N/A")
+                    .append(" | Thực tế trả: ").append(br.getReturnTime() != null ? sdf.format(br.getReturnTime()) : "Chưa trả");
+
+            if (br.getReturnTime() == null)
+                response.append(" <a href='/return?id=").append(br.getBookId()).append("'>[Trả]</a>");
+
+            response.append("</li>");
+        }
+
+        response.append("</ul><a href='/'>Quay lại</a></body></html>");
+        sendResponse(exchange, response.toString());
+    }
+
+    // ================== Utility ==================
+    private static void sendResponse(HttpExchange exchange, String response) throws IOException {
+        byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8");
+        exchange.sendResponseHeaders(200, bytes.length);
+        try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
+    }
+
+    private static void redirect(HttpExchange exchange, String location) throws IOException {
+        exchange.getResponseHeaders().add("Location", location);
+        exchange.sendResponseHeaders(302, -1);
+        exchange.close();
+    }
+
+    private static String getUser(HttpExchange exchange) {
+        String sessionId = getSessionId(exchange);
+        return sessions.get(sessionId);
+    }
+
+    private static String getSessionId(HttpExchange exchange) {
+        List<String> cookies = exchange.getRequestHeaders().get("Cookie");
+        if (cookies != null) {
+            for (String cookie : cookies) {
+                for (String c : cookie.split(";")) {
+                    String[] kv = c.trim().split("=");
+                    if (kv.length == 2 && kv[0].equals("sessionId")) return kv[1];
+                }
+            }
+        }
+        return null;
+    }
+
+    private static Map<String, String> parsePost(HttpExchange exchange) throws IOException {
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        Map<String, String> params = new HashMap<>();
+        for (String pair : body.split("&")) {
+            String[] kv = pair.split("=");
+            if (kv.length == 2)
+                params.put(URLDecoder.decode(kv[0], StandardCharsets.UTF_8),
+                           URLDecoder.decode(kv[1], StandardCharsets.UTF_8));
+        }
+        return params;
     }
 }
