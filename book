@@ -4,37 +4,52 @@ public class Book {
     private String id;
     private String title;
     private String author;
-    private String status; // available / borrowed
+    private int totalCopies;
+    private int borrowedCopies;
 
-    public Book(String id, String title, String author, String status) {
+    public Book(String id, String title, String author, int totalCopies) {
+        this.id = id;
+        this.title = title;
+        this.author = authorpackage Server;
+
+public class Book {
+    private String id;
+    private String title;
+    private String author;
+    private int totalCopies;
+    private int borrowedCopies;
+
+    public Book(String id, String title, String author, int totalCopies) {
         this.id = id;
         this.title = title;
         this.author = author;
-        this.status = status;
+        this.totalCopies = totalCopies;
+        this.borrowedCopies = 0;
     }
 
-    public String getId() {
-        return id;
+    public String getId() { return id; }
+    public String getTitle() { return title; }
+    public String getAuthor() { return author; }
+    public int getTotalCopies() { return totalCopies; }
+    public int getBorrowedCopies() { return borrowedCopies; }
+
+    public int getAvailableCopies() { return totalCopies - borrowedCopies; }
+
+    public void borrow() { if (getAvailableCopies() > 0) borrowedCopies++; }
+    public void returned() { if (borrowedCopies > 0) borrowedCopies--; }
+};
+        this.totalCopies = totalCopies;
+        this.borrowedCopies = 0;
     }
 
-    public String getTitle() {
-        return title;
-    }
+    public String getId() { return id; }
+    public String getTitle() { return title; }
+    public String getAuthor() { return author; }
+    public int getTotalCopies() { return totalCopies; }
+    public int getBorrowedCopies() { return borrowedCopies; }
 
-    public String getAuthor() {
-        return author;
-    }
+    public int getAvailableCopies() { return totalCopies - borrowedCopies; }
 
-    public String getStatus() {
-        return status;
-    }
-
-    public void setStatus(String status) {
-        this.status = status;
-    }
-
-    @Override
-    public String toString() {
-        return id + " | " + title + " | " + author + " | " + status;
-    }
+    public void borrow() { if (getAvailableCopies() > 0) borrowedCopies++; }
+    public void returned() { if (borrowedCopies > 0) borrowedCopies--; }
 }
