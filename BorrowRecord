@@ -1,0 +1,25 @@
+package Server;
+
+import java.util.*;
+
+public class BorrowRecord {
+    private String bookId;
+    private Date borrowTime;
+    private Date dueDate;
+    private Date returnTime;
+
+    public BorrowRecord(String bookId, Date borrowTime) {
+        this.bookId = bookId;
+        this.borrowTime = borrowTime;
+        Calendar cal = Calendar.getInstance();
+        cal.setTime(borrowTime);
+        cal.add(Calendar.DAY_OF_MONTH, 7); // thời hạn mượn 7 ngày
+        this.dueDate = cal.getTime();
+    }
+
+    public String getBookId() { return bookId; }
+    public Date getBorrowTime() { return borrowTime; }
+    public Date getDueDate() { return dueDate; }
+    public Date getReturnTime() { return returnTime; }
+    public void setReturnTime(Date returnTime) { this.returnTime = returnTime; }
+}
