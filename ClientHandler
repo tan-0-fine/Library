@@ -1,69 +1,107 @@
 package Server;
 
 import java.io.*;
-import java.net.*;
+import java.net.Socket;
+import java.text.SimpleDateFormat;
+import java.util.*;
 
-public class ClientHandler implements Runnable {
+public class ClientHandler extends Thread {
     private Socket socket;
-    private BufferedReader in;
-    private PrintWriter out;
-    private LibraryData library;   // dùng chung LibraryData từ server
+    private String username;
+    private static Map<String, List<BorrowRecord>> borrowedBooks = new HashMap<>();
+    private static SimpleDateFormat sdf = new SimpleDateFormat("MM/dd/yyyy HH:mm:ss");
 
-    // ✅ Constructor nhận thêm LibraryData
-    public ClientHandler(Socket socket, LibraryData libraryData) {
+    public ClientHandler(Socket socket) {
         this.socket = socket;
-        this.library = libraryData;
     }
 
     @Override
     public void run() {
-        try {
-            in  = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            out = new PrintWriter(socket.getOutputStream(), true);
+        try (BufferedReader in = new BufferedReader(
+                    new InputStreamReader(socket.getInputStream()));
+             PrintWriter out = new PrintWriter(socket.getOutputStream(), true)) {
 
-            out.println("📚 Ket noi toi Library Server thanh cong!");
-            out.println("Nhap lenh: SEARCH <keyword>, BORROW <id>, RETURN <id>, EXIT");
+            out.println("Nhập tên đăng nhập:");
+            username = in.readLine();
 
-            String msg;
-            while ((msg = in.readLine()) != null) {
-                System.out.println("📩 Nhan tu client: " + msg);
-
-                if (msg.equalsIgnoreCase("EXIT")) {
-                    out.println("Tam biet!");
-                    break;
-                }
-
-                String[] parts = msg.split(" ", 2);
-                String command = parts[0].toUpperCase();
-                String response;
+            String line;
+            while ((line = in.readLine()) != null) {
+                String[] parts = line.split(" ", 2);
+                String command = parts[0].toLowerCase();
+                String response = "";
 
                 switch (command) {
-                    case "SEARCH":
-                        if (parts.length > 1) response = library.search(parts[1]);
-                        else response = "⚠️ Cu phap: SEARCH <tu khoa>";
+                    case "borrow":
+                        if (parts.length > 1) {
+                            String bookId = parts[1];
+                            Book book = LibraryData.findBookById(bookId);
+                            if (book != null && book.getAvailableCopies() > 0) {
+                                LibraryData.borrowBook(bookId);
+                                borrowedBooks.putIfAbsent(username, new ArrayList<>());
+                                BorrowRecord br = new BorrowRecord(bookId, new Date());
+                                borrowedBooks.get(username).add(br);
+                                response = "Đã mượn sách: " + book.getTitle() + ". Ngày dự kiến trả: " 
+                                           + sdf.format(br.getDueDate());
+                            } else {
+                                response = "Sách không còn hoặc không tồn tại.";
+                            }
+                        }
                         break;
-
-                    case "BORROW":
-                        if (parts.length > 1) response = library.borrow(parts[1]);
-                        else response = "⚠️ Cu phap: BORROW <id>";
+                    case "return":
+                        if (parts.length > 1) {
+                            String bookId = parts[1];
+                            List<BorrowRecord> history = borrowedBooks.get(username);
+                            if (history != null) {
+                                for (BorrowRecord br : history) {
+                                    if (br.getBookId().equals(bookId) && br.getReturnTime() == null) {
+                                        br.setReturnTime(new Date());
+                                        LibraryData.returnBook(bookId);
+                                        response = "Đã trả sách: " + LibraryData.findBookById(bookId).getTitle();
+                                        break;
+                                    }
+                                }
+                                if (response.isEmpty()) response = "Bạn chưa mượn sách này hoặc đã trả.";
+                            } else {
+                                response = "Bạn chưa mượn sách nào.";
+                            }
+                        }
                         break;
-
-                    case "RETURN":
-                        if (parts.length > 1) response = library.returnBook(parts[1]);
-                        else response = "⚠️ Cu phap: RETURN <id>";
+                    case "history":
+                        List<BorrowRecord> history = borrowedBooks.get(username);
+                        if (history != null) {
+                            StringBuilder sb = new StringBuilder();
+                            for (BorrowRecord br : history) {
+                                Book book = LibraryData.findBookById(br.getBookId());
+                                sb.append(book.getTitle()).append(" (").append(book.getAuthor()).append(") - ")
+                                  .append("Mượn: ").append(sdf.format(br.getBorrowTime()))
+                                  .append(" | Dự kiến trả: ").append(sdf.format(br.getDueDate()))
+                                  .append(" | Thực tế trả: ").append(br.getReturnTime() != null ? sdf.format(br.getReturnTime()) : "Chưa trả")
+                                  .append("\n");
+                            }
+                            response = sb.toString();
+                        } else {
+                            response = "Bạn chưa mượn sách nào.";
+                        }
                         break;
-
+                    case "list":
+                        StringBuilder sb = new StringBuilder();
+                        for (Book b : LibraryData.getBooks()) {
+                            sb.append(b.getId()).append(" - ").append(b.getTitle())
+                              .append(" (").append(b.getAuthor()).append(") | Còn: ")
+                              .append(b.getAvailableCopies()).append("/").append(b.getTotalCopies())
+                              .append("\n");
+                        }
+                        response = sb.toString();
+                        break;
                     default:
-                        response = "❓ Lenh khong hop le.";
+                        response = "Lệnh không hợp lệ. Dùng: list, borrow <id>, return <id>, history";
                 }
 
                 out.println(response);
             }
 
         } catch (IOException e) {
-            System.out.println("❌ Client ngat ket noi: " + socket.getInetAddress());
-        } finally {
-            try { socket.close(); } catch (IOException e) {}
+            e.printStackTrace();
         }
     }
 }
