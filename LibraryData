@@ -4,59 +4,70 @@ import java.io.*;
 import java.util.*;
 
 public class LibraryData {
-    private static final String DATA_FILE = "data/books.txt";
-    private Map<String, Book> books = new HashMap<>();
+    private static List<Book> books = new ArrayList<>();
+    private static final String BOOK_FILE = "data/books.txt";
 
-    public LibraryData(String filename) {
-        loadBooks(filename);
+    public static List<Book> getBooks() {
+        return books;
     }
 
-    private void loadBooks(String filename) {
-        try (BufferedReader br = new BufferedReader(new FileReader(filename))) {
+    // Load sách từ file
+    public static void loadBooks() {
+        books.clear();
+        try (BufferedReader br = new BufferedReader(new FileReader(BOOK_FILE))) {
             String line;
             while ((line = br.readLine()) != null) {
-                // Format: id,title,author,status
-                String[] parts = line.split(",");
-                if (parts.length == 4) {
-                    books.put(parts[0], new Book(parts[0], parts[1], parts[2], parts[3]));
+                // Format: id,title,author,totalCopies
+                String[] parts = line.split(",", 4);
+                if (parts.length >= 4) {
+                    books.add(new Book(
+                        parts[0].trim(),
+                        parts[1].trim(),
+                        parts[2].trim(),
+                        Integer.parseInt(parts[3].trim())
+                    ));
                 }
             }
-            System.out.println("✅ Tai du lieu sach thanh cong: " + books.size() + " cuon.");
         } catch (IOException e) {
-            System.out.println("⚠️ Khong the đoc file sach: " + filename);
+            System.out.println("Không thể load books.txt");
         }
     }
 
-    public synchronized String search(String keyword) {
-        StringBuilder result = new StringBuilder();
-        for (Book book : books.values()) {
-            if (book.getTitle().toLowerCase().contains(keyword.toLowerCase()) ||
-                book.getAuthor().toLowerCase().contains(keyword.toLowerCase())) {
-                result.append(book).append("\n");
+    // Mượn sách (tăng borrowedCopies)
+    public static boolean borrowBook(String bookId) {
+        for (Book b : books) {
+            if (b.getId().equals(bookId) && b.getAvailableCopies() > 0) {
+                b.borrow();
+                return true;
             }
         }
-        return result.length() > 0 ? result.toString() : "❌ Khong tim thay sach nao.";
+        return false; // không còn sách hoặc không tồn tại
     }
 
-    public synchronized String borrow(String id) {
-        Book book = books.get(id);
-        if (book == null) return "❌ Khong ton tai sach co ID: " + id;
-        if (book.getStatus().equalsIgnoreCase("available")) {
-            book.setStatus("borrowed");
-            return "✅ Muon sach thanh cang: " + book.getTitle();
-        } else {
-            return "❌ Sach da duoc muon: " + book.getTitle();
+    // Trả sách (giảm borrowedCopies)
+    public static boolean returnBook(String bookId) {
+        for (Book b : books) {
+            if (b.getId().equals(bookId) && b.getBorrowedCopies() > 0) {
+                b.returned();
+                return true;
+            }
         }
+        return false; // không tìm thấy sách hoặc chưa ai mượn
     }
 
-    public synchronized String returnBook(String id) {
-        Book book = books.get(id);
-        if (book == null) return "❌ Khong ton tai sach co ID: " + id;
-        if (book.getStatus().equalsIgnoreCase("borrowed")) {
-            book.setStatus("available");
-            return "✅ Tra sach thanh cong: " + book.getTitle();
-        } else {
-            return "❌ Sach nay chua duoc muon.";
+    // Tìm sách theo id
+    public static Book findBookById(String bookId) {
+        for (Book b : books) {
+            if (b.getId().equals(bookId)) return b;
+        }
+        return null;
+    }
+
+    // Hiển thị danh sách sách (chuẩn)
+    public static void printBooks() {
+        for (Book b : books) {
+            System.out.println(b.getId() + " - " + b.getTitle() + " (" + b.getAuthor() + ") "
+                    + "| Số lượng còn: " + b.getAvailableCopies() + "/" + b.getTotalCopies());
         }
     }
 }
