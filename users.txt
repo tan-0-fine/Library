@@ -1,4 +1,2 @@
-user1:password
 tan:123456
-aa:123
 admin:123456
